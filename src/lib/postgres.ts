@@ -481,6 +481,7 @@ export type PostgresCanvasPoint = {
 
 export type PostgresCanvasNodeState = {
   id: string;
+  pinned?: boolean;
   x: number;
   y: number;
   width: number;

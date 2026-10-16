@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useI18n } from "../i18n/provider";
 import { FilterIcon } from "../components/FilterIcon";
-import { CodeIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon } from "../components/AppIcons";
+import { CodeIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon } from "../components/AppIcons";
 import type {
   PostgresCanvasNodeState,
   PostgresObject,
@@ -275,13 +275,10 @@ function ProjectHomeCanvasSizeSection({
 export function ProjectHomeGraphView({
   createControlRef,
   filterControlRef,
-  sizeControlRef,
   createMenuOpen,
   setCreateMenuOpen,
   filterDrawerOpen,
   setFilterDrawerOpen,
-  sizeMenuOpen,
-  setSizeMenuOpen,
   graphLoading,
   canvasStateLoaded,
   loadingFallback,
@@ -342,16 +339,14 @@ export function ProjectHomeGraphView({
   onOpenDrawTool: _onOpenDrawTool,
   drawCanvasToolbar: _drawCanvasToolbar,
   autoLayoutOnVisibleKey,
+  autoLayoutOnInitialLoad = true,
 }: {
   createControlRef: RefObject<HTMLDivElement | null>;
   filterControlRef: RefObject<HTMLDivElement | null>;
-  sizeControlRef: RefObject<HTMLDivElement | null>;
   createMenuOpen: boolean;
   setCreateMenuOpen: Dispatch<SetStateAction<boolean>>;
   filterDrawerOpen: boolean;
   setFilterDrawerOpen: Dispatch<SetStateAction<boolean>>;
-  sizeMenuOpen: boolean;
-  setSizeMenuOpen: Dispatch<SetStateAction<boolean>>;
   graphLoading: boolean;
   canvasStateLoaded: boolean;
   loadingFallback: ReactNode;
@@ -460,6 +455,7 @@ export function ProjectHomeGraphView({
   onOpenDrawTool?: unknown;
   drawCanvasToolbar?: ReactNode;
   autoLayoutOnVisibleKey?: number;
+  autoLayoutOnInitialLoad?: boolean;
 }) {
   const { t } = useI18n();
   const renderGraphCreateControl = () => (
@@ -568,7 +564,57 @@ export function ProjectHomeGraphView({
               onCanvasRelationshipDraftComplete={onCanvasRelationshipDraftComplete}
               fitOnVisibleKey={fitOnVisibleKey}
               autoLayoutOnVisibleKey={autoLayoutOnVisibleKey}
+              autoLayoutOnInitialLoad={autoLayoutOnInitialLoad}
               controlLead={renderGraphCreateControl()}
+              itemSizeControls={(
+                <div className="graph-settings-item-sizes">
+                        <div className="project-home-size-menu-header">
+                          <div className="project-home-size-menu-title">{t("projectCore.graph.itemSizes")}</div>
+                          <button
+                            type="button"
+                            className="btn btn--ghost project-home-size-reset-btn"
+                            onClick={resetAllNodeSizes}
+                            disabled={!customSizesActive}
+                          >
+                            {t("projectCore.graph.resetAll")}
+                          </button>
+                        </div>
+                        {sizeGroupCount === 0 ? (
+                          <div className="project-home-size-menu-empty">{t("projectCore.graph.noVisibleItems")}</div>
+                        ) : (
+                          <div className="home-primary-column project-home-primary-column project-home-selector-column project-home-selector-column--drawer project-home-size-section-column">
+                            <ProjectHomeCanvasSizeSection
+                              title={t("projectCore.entities.sources")}
+                              count={sourceSizeRows.reduce((total, row) => total + row.count, 0)}
+                              collapsed={sizeCollapsedSections.has("sources")}
+                              rows={sourceSizeRows}
+                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("sources")}
+                              onResize={onResizeNodeGroup}
+                              emptyText={t("projectCore.graph.noVisibleSources")}
+                            />
+                            <ProjectHomeCanvasSizeSection
+                              title={t("projectCore.entities.objects")}
+                              count={objectSizeRows.reduce((total, row) => total + row.count, 0)}
+                              collapsed={sizeCollapsedSections.has("objects")}
+                              rows={objectSizeRows}
+                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("objects")}
+                              onResize={onResizeNodeGroup}
+                              emptyText={t("projectCore.graph.noVisibleObjects")}
+                            />
+                            <ProjectHomeCanvasSizeSection
+                              title={t("projectCore.entities.codes")}
+                              count={codeSizeRows.reduce((total, row) => total + row.count, 0)}
+                              collapsed={sizeCollapsedSections.has("codes")}
+                              rows={codeSizeRows}
+                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("codes")}
+                              onResize={onResizeNodeGroup}
+                              emptyText={t("projectCore.graph.noVisibleCodes")}
+                            />
+                          </div>
+                        )}
+                </div>
+              )}
+              customItemSizes={customSizesActive}
               controlStart={(
                 <>
                   <div className="project-home-canvas-filter-control" ref={filterControlRef}>
@@ -650,66 +696,6 @@ export function ProjectHomeGraphView({
                             emptyText={t("projectCore.graph.noCodes")}
                           />
                         </div>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="project-home-canvas-size-control" ref={sizeControlRef}>
-                    <button
-                      type="button"
-                      className={`btn ${customSizesActive ? "btn--primary" : "btn--ghost"}`}
-                      onClick={() => setSizeMenuOpen((current) => !current)}
-                      aria-expanded={sizeMenuOpen}
-                      aria-label={sizeMenuOpen ? t("projectCore.graph.hideSizeControls") : t("projectCore.graph.showSizeControls")}
-                      title={t("projectCore.graph.canvasItemSizes")}
-                    >
-                      <FitCornersIcon className="graph-canvas-canvas-control-icon" />
-                    </button>
-                    {sizeMenuOpen ? (
-                      <div className="project-home-size-menu">
-                        <div className="project-home-size-menu-header">
-                          <div className="project-home-size-menu-title">{t("projectCore.graph.itemSizes")}</div>
-                          <button
-                            type="button"
-                            className="btn btn--ghost project-home-size-reset-btn"
-                            onClick={resetAllNodeSizes}
-                            disabled={!customSizesActive}
-                          >
-                            {t("projectCore.graph.resetAll")}
-                          </button>
-                        </div>
-                        {sizeGroupCount === 0 ? (
-                          <div className="project-home-size-menu-empty">{t("projectCore.graph.noVisibleItems")}</div>
-                        ) : (
-                          <div className="home-primary-column project-home-primary-column project-home-selector-column project-home-selector-column--drawer project-home-size-section-column">
-                            <ProjectHomeCanvasSizeSection
-                              title={t("projectCore.entities.sources")}
-                              count={sourceSizeRows.reduce((total, row) => total + row.count, 0)}
-                              collapsed={sizeCollapsedSections.has("sources")}
-                              rows={sourceSizeRows}
-                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("sources")}
-                              onResize={onResizeNodeGroup}
-                              emptyText={t("projectCore.graph.noVisibleSources")}
-                            />
-                            <ProjectHomeCanvasSizeSection
-                              title={t("projectCore.entities.objects")}
-                              count={objectSizeRows.reduce((total, row) => total + row.count, 0)}
-                              collapsed={sizeCollapsedSections.has("objects")}
-                              rows={objectSizeRows}
-                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("objects")}
-                              onResize={onResizeNodeGroup}
-                              emptyText={t("projectCore.graph.noVisibleObjects")}
-                            />
-                            <ProjectHomeCanvasSizeSection
-                              title={t("projectCore.entities.codes")}
-                              count={codeSizeRows.reduce((total, row) => total + row.count, 0)}
-                              collapsed={sizeCollapsedSections.has("codes")}
-                              rows={codeSizeRows}
-                              onToggleCollapsed={() => onToggleSizeSectionCollapsed("codes")}
-                              onResize={onResizeNodeGroup}
-                              emptyText={t("projectCore.graph.noVisibleCodes")}
-                            />
-                          </div>
-                        )}
                       </div>
                     ) : null}
                   </div>

@@ -11,7 +11,7 @@ const tests = process.argv.includes('--performance')
     'test-annotation-screen', 'test-annotation-return', 'test-list-return',
     'test-table-return', 'test-view-navigation', 'test-navigation-preload',
     'test-lock-readiness', 'diagnose-text-selection', 'diagnose-annotation-deletion',
-    'test-installation-restore', 'test-startup-restore-steps',
+    'test-installation-restore', 'test-startup-restore-steps', 'test-canvas-zoom', 'test-canvas-layout',
   ];
 const failures = [];
 for (const name of tests) {

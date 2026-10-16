@@ -828,6 +828,26 @@ mod tests {
             assert!(insert_rows(&transaction, "annotation_codes", &[serde_json::json!({"annotation_id":"missing", "code_id":"child"})], "new-project").await.is_err());
             transaction.rollback().await.unwrap();
             assert_eq!(client.query_one("SELECT count(*) FROM sources WHERE id='rollback'", &[]).await.unwrap().get::<_, i64>(0), 0);
+            // Optionally validate a generated project through the real streaming
+            // importer and application schema, in this disposable database only.
+            if let Ok(path) = std::env::var("KANQUAL_IMPORT_FIXTURE") {
+                let progress = project_import_stream::Progress::new(None, "external-fixture".into());
+                let staged = project_import_stream::prepare(Path::new(&path), None, &progress).unwrap().unwrap();
+                assert!(staged.warnings.is_empty(), "Unexpected import warnings: {:?}", staged.warnings);
+                let transaction = client.transaction().await.unwrap();
+                for table in IMPORT_TABLES.iter().rev() {
+                    transaction.execute(&format!("DELETE FROM {}", sql_escape_identifier(table)), &[]).await.unwrap();
+                }
+                for table in IMPORT_TABLES {
+                    if let Some(file) = staged.tables.get(*table) {
+                        insert_row_stream(&transaction, table, project_import_stream::rows(file).unwrap(), "generated-project", Some((&progress, file.count))).await.unwrap();
+                        let count: i64 = transaction.query_one(&format!("SELECT count(*) FROM {}", sql_escape_identifier(table)), &[]).await.unwrap().get(0);
+                        assert_eq!(count as u64, file.count, "Row count differs for {table}");
+                    }
+                }
+                transaction.rollback().await.unwrap();
+                println!("Generated project imported without warnings or foreign-key errors: {path}");
+            }
             drop(client);
             task.await.unwrap();
         });

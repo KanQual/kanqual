@@ -1,3 +1,7 @@
+import { CanvasGraphSettings } from "../components/CanvasGraphSettings";
+import { CanvasPinBadges } from "../components/CanvasPinBadges";
+import { canvasLayoutGroups, DEFAULT_CANVAS_LAYOUT_SETTINGS } from "../lib/canvasLayoutSettings";
+import { canvasHasVisiblePins, canvasZoomPercent, observeCanvasZoomBounds, updateCanvasZoomBounds } from "../lib/canvasZoom";
 import { usePostgresStoredImageUrlMap } from "../lib/postgresStoredImages";
 import { openOriginalImage } from "../lib/imagePreviews";
 import { releaseMediaUrl } from "../lib/mediaStream";
@@ -5,12 +9,13 @@ import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEff
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import cytoscape, { type Core as CytoscapeCore, type ElementDefinition, type NodeSingular } from "cytoscape";
-import ELK from "elkjs/lib/elk.bundled.js";
 import {
   POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON,
   POSTGRES_CYTOSCAPE_STYLESHEET,
+  getCanvasLabelFontSize,
+  getPostgresCanvasTextMaxWidth,
 } from "../lib/postgresCanvasGraph";
-import { DownloadIcon, FitCornersIcon, HelpIcon, LayoutNetworkIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
+import { DownloadIcon, FitCornersIcon, HelpIcon, LayoutNetworkIcon, PinIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { HelpModal } from "../components/HelpModal";
 import { useI18n } from "../i18n/provider";
@@ -22,7 +27,6 @@ import type {
   PostgresRelationshipType,
 } from "../lib/postgres";
 
-const postgresExploreElk = new ELK();
 
 type PostgresExploreInspectorDetails = {
   title: string;
@@ -196,88 +200,13 @@ async function composeGraphPngWithGridlines(dataUrl: string, errors: {
 
 function fitExploreCanvas(cy: CytoscapeCore, padding = 36) {
   cy.resize();
-  const elements = cy.elements();
+  updateCanvasZoomBounds(cy, padding);
+  const elements = cy.elements(":visible");
   if (elements.length > 0) {
     cy.fit(elements, padding);
   } else {
     cy.center();
   }
-}
-
-async function computePostgresCanvasAutoLayout({
-  objects,
-  objectTypes,
-  relationships,
-  canvasNodes,
-  hiddenRelationshipIds,
-  getNodeRenderedDimensions,
-}: {
-  objects: PostgresObject[];
-  objectTypes: PostgresObjectType[];
-  relationships: PostgresRelationship[];
-  canvasNodes: Record<string, PostgresCanvasNodeState>;
-  hiddenRelationshipIds: string[];
-  getNodeRenderedDimensions: (
-    object: PostgresObject,
-    objectTypeRecord: PostgresObjectType | null,
-    nodeState: PostgresCanvasNodeState,
-  ) => { width: number; height: number };
-}): Promise<Record<string, PostgresCanvasNodeState>> {
-  const visibleNodeIds = new Set(
-    objects
-      .filter((object) => canvasNodes[object.id])
-      .map((object) => object.id),
-  );
-  if (!visibleNodeIds.size) return canvasNodes;
-  const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
-
-  const layout = await postgresExploreElk.layout({
-    id: "root",
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "72",
-      "elk.spacing.nodeNode": "40",
-      "elk.padding": "[top=32,left=32,bottom=32,right=32]",
-    },
-    children: objects
-      .filter((object) => visibleNodeIds.has(object.id))
-      .map((object) => {
-        const nodeState = canvasNodes[object.id];
-        const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
-        const dimensions = getNodeRenderedDimensions(object, objectTypeRecord, nodeState);
-        return {
-          id: object.id,
-          width: dimensions.width,
-          height: dimensions.height,
-        };
-      }),
-    edges: relationships
-      .filter((relationship) =>
-        !hiddenRelationshipIds.includes(relationship.id)
-        && visibleNodeIds.has(relationship.fromObjectId)
-        && visibleNodeIds.has(relationship.toObjectId),
-      )
-      .map((relationship) => ({
-        id: relationship.id,
-        sources: [relationship.fromObjectId],
-        targets: [relationship.toObjectId],
-      })),
-  });
-
-  const nextNodes = { ...canvasNodes };
-  for (const child of layout.children ?? []) {
-    if (!child.id || !nextNodes[child.id]) continue;
-    nextNodes[child.id] = {
-      ...nextNodes[child.id],
-      x: typeof child.x === "number" ? child.x : nextNodes[child.id].x,
-      y: typeof child.y === "number" ? child.y : nextNodes[child.id].y,
-      width: typeof child.width === "number" ? child.width : nextNodes[child.id].width,
-      height: typeof child.height === "number" ? child.height : nextNodes[child.id].height,
-    };
-  }
-
-  return nextNodes;
 }
 
 export function ExploreCanvasView({
@@ -294,6 +223,8 @@ export function ExploreCanvasView({
   getRelationshipStrokeWidth,
   getNodeDefaultDimensions,
   getNodeRenderedDimensions,
+  itemSizeControls = null,
+  customItemSizes = false,
   controlStart = null,
   controlLead = null,
   controlSecondary = null,
@@ -305,6 +236,7 @@ export function ExploreCanvasView({
   embedded = false,
   fitOnVisibleKey = 0,
   autoLayoutOnVisibleKey = 0,
+  autoLayoutOnInitialLoad = true,
 }: {
   objectTypes: PostgresObjectType[];
   objects: PostgresObject[];
@@ -358,6 +290,8 @@ export function ExploreCanvasView({
     objectTypeRecord: PostgresObjectType | null,
     nodeState: PostgresCanvasNodeState,
   ) => { width: number; height: number };
+  itemSizeControls?: ReactNode;
+  customItemSizes?: boolean;
   controlStart?: ReactNode;
   controlLead?: ReactNode;
   controlSecondary?: ReactNode;
@@ -386,15 +320,17 @@ export function ExploreCanvasView({
   embedded?: boolean;
   fitOnVisibleKey?: number;
   autoLayoutOnVisibleKey?: number;
+  autoLayoutOnInitialLoad?: boolean;
 }) {
   const { t } = useI18n();
   const cyContainerRef = useRef<HTMLDivElement | null>(null);
-  const zoomControlRef = useRef<HTMLDivElement | null>(null);
+  const [badgeGraph, setBadgeGraph] = useState<CytoscapeCore | null>(null);
   const cyRef = useRef<CytoscapeCore | null>(null);
   const relationshipDraftRef = useRef<PostgresExploreRelationshipDraft | null>(null);
   const relationshipDraftLineRef = useRef<SVGLineElement | null>(null);
   const suppressNextBackgroundTapRef = useRef(false);
   const initialGraphFitDoneRef = useRef(false);
+  const initialAutoLayoutDoneRef = useRef(false);
   const lastAutoLayoutVisibleKeyRef = useRef(0);
   const pendingViewportRestoreRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
   const objectTypeById = useMemo(
@@ -403,21 +339,33 @@ export function ExploreCanvasView({
   );
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [networkSettings, setNetworkSettings] = useState(DEFAULT_CANVAS_LAYOUT_SETTINGS);
+  const groupingItems = useMemo(() => objects.map(object => {
+    const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
+    const details = getInspectorDetails?.({ kind: "object", object, objectTypeRecord });
+    return {
+      id: object.id,
+      kind: details?.itemType ?? t("projectCore.entities.object"),
+      type: details?.typeDetail ?? object.objectType ?? objectTypeRecord?.name ?? "",
+      attributes: details?.attributes ?? (object.attributeValues ?? []).map(value => ({ name: value.attributeName, value: value.value })),
+    };
+  }), [objects, objectTypeById, getInspectorDetails, t]);
+  const groupingAttributes = useMemo(() => [...new Set(groupingItems.flatMap(item => item.attributes.map(attribute => attribute.name)))].sort(), [groupingItems]);
   const [layoutRunning, setLayoutRunning] = useState(false);
   const [layoutError, setLayoutError] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [connectorHandle, setConnectorHandle] = useState<PostgresExploreConnectorHandle | null>(null);
   const [resizeHandle, setResizeHandle] = useState<PostgresExploreResizeHandle | null>(null);
   const [relationshipDraft, setRelationshipDraft] = useState<PostgresExploreRelationshipDraft | null>(null);
+  const zoomControlRef = useRef<HTMLDivElement | null>(null);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
-  const [defaultZoomPercent, setDefaultZoomPercent] = useState(100);
+  const [minimumZoomPercent, setMinimumZoomPercent] = useState(10);
   const [autoLayoutSignature, setAutoLayoutSignature] = useState("");
   const [graphExportModalOpen, setGraphExportModalOpen] = useState(false);
   const [graphExportGridlines, setGraphExportGridlines] = useState(true);
   const [graphExportBusy, setGraphExportBusy] = useState(false);
   const [graphExportError, setGraphExportError] = useState("");
-  const zoomIsCustomized = Math.abs(zoomPercent - defaultZoomPercent) >= 1;
   const currentLayoutSignature = useMemo(() => postgresExploreLayoutSignature(canvasNodes), [canvasNodes]);
   const autoLayoutIsCustomized = currentLayoutSignature.length > 0
     && (autoLayoutSignature.length === 0 || currentLayoutSignature !== autoLayoutSignature);
@@ -674,6 +622,7 @@ export function ExploreCanvasView({
           group: "nodes",
           data: {
             id: object.id,
+            pinned: Boolean(nodeState.pinned),
             color: appearance.color,
             outlineColor,
             backgroundColor: appearance.color,
@@ -689,7 +638,8 @@ export function ExploreCanvasView({
             sourceImageHeight: appearance.sourceImageHeight ?? sourceImageHeight,
             sourceSilhouettePolygon: sourceImage ? (appearance.sourceSilhouettePolygon ?? POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON) : "",
             textColor: surface.textColor,
-            textMaxWidth: Math.max(72, Math.floor(width * 0.72)),
+            textMaxWidth: Math.max(1, getPostgresCanvasTextMaxWidth(appearance.shape, width)),
+            fontSize: getCanvasLabelFontSize({ width, height }, getNodeDefaultDimensions(object, objectTypeRecord)),
             width,
             height,
             label: sourceImage ? "" : (object.title.trim() || "Untitled object"),
@@ -731,7 +681,7 @@ export function ExploreCanvasView({
 
       return [...nodes, ...edges];
     },
-    [previewUrls, canvasNodes, getNodeRenderedDimensions, getObjectAppearance, getObjectSurfaceStyle, getRelationshipAppearance, getRelationshipStrokeWidth, hiddenCanvasRelationshipIds, objectTypeById, objects, relationshipTypes, relationships],
+    [previewUrls, canvasNodes, getNodeDefaultDimensions, getNodeRenderedDimensions, getObjectAppearance, getObjectSurfaceStyle, getRelationshipAppearance, getRelationshipStrokeWidth, hiddenCanvasRelationshipIds, objectTypeById, objects, relationshipTypes, relationships],
   );
   const selectedObject = selectedNodeId ? objectById.get(selectedNodeId) ?? null : null;
   const selectedRelationship = selectedEdgeId ? relationshipById.get(selectedEdgeId) ?? null : null;
@@ -785,6 +735,7 @@ export function ExploreCanvasView({
     return {
       ...current,
       [node.id]: {
+        ...current[node.id],
         id: node.id,
         x: node.position.x,
         y: node.position.y,
@@ -794,20 +745,27 @@ export function ExploreCanvasView({
     };
   }
 
-  async function handleAutoLayout() {
+  async function handleAutoLayout(fitAfterLayout = false) {
+    if (layoutRunning || !cyRef.current) return;
     setLayoutRunning(true);
     setLayoutError("");
     try {
-      const nextCanvasNodes = await computePostgresCanvasAutoLayout({
-        objects,
-        objectTypes,
-        relationships,
-        canvasNodes,
-        hiddenRelationshipIds: hiddenCanvasRelationshipIds,
-        getNodeRenderedDimensions,
-      });
+      const { computeCanvasNetworkLayout } = await import("../lib/canvasNetworkLayout");
+      const cy = cyRef.current;
+      if (!cy || cy.destroyed()) return;
+      const nextCanvasNodes = computeCanvasNetworkLayout(cy, canvasNodes, networkSettings, canvasLayoutGroups(groupingItems, networkSettings.groupBy));
       setAutoLayoutSignature(postgresExploreLayoutSignature(nextCanvasNodes));
       setCanvasNodes(nextCanvasNodes);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const cy = cyRef.current;
+        if (!cy || cy.destroyed()) return;
+        if (fitAfterLayout || !canvasHasVisiblePins(cy)) {
+          fitExploreCanvas(cy, 36);
+          recordCurrentCanvasZoom(cy);
+        }
+        updateConnectorHandleRef.current();
+        updateResizeHandleRef.current();
+      }));
     } catch (error) {
       setLayoutError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -815,23 +773,38 @@ export function ExploreCanvasView({
     }
   }
 
+  useEffect(() => {
+    if (!zoomMenuOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !zoomControlRef.current?.contains(event.target)) setZoomMenuOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setZoomMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [zoomMenuOpen]);
+
   function setCanvasZoomFromPercent(percent: number) {
     const cy = cyRef.current;
     if (!cy) return;
-    const clampedPercent = Math.max(10, Math.min(300, percent));
+    const clampedPercent = Math.max(cy.minZoom() * 100, Math.min(cy.maxZoom() * 100, percent));
     cy.zoom({
       level: clampedPercent / 100,
       renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
     });
-    setZoomPercent(Math.round(cy.zoom() * 100));
+    setZoomPercent(canvasZoomPercent(cy.zoom()));
     updateConnectorHandleRef.current();
     updateResizeHandleRef.current();
   }
 
-  function recordCurrentCanvasZoomAsDefault(cy: CytoscapeCore) {
-    const nextZoomPercent = Math.round(cy.zoom() * 100);
+  function recordCurrentCanvasZoom(cy: CytoscapeCore) {
+    const nextZoomPercent = canvasZoomPercent(cy.zoom());
     setZoomPercent(nextZoomPercent);
-    setDefaultZoomPercent(nextZoomPercent);
   }
 
   async function handleExportGraphPng() {
@@ -893,11 +866,34 @@ export function ExploreCanvasView({
     }
   }
 
+  const pinTargetIds = selectedObject ? [selectedObject.id]
+    : selectedRelationship ? [...new Set([selectedRelationship.fromObjectId, selectedRelationship.toObjectId])] : [];
+  const selectionPinned = pinTargetIds.length > 0 && pinTargetIds.every(id => canvasNodes[id]?.pinned);
+  const pinLabel = selectedRelationship
+    ? t(selectionPinned ? "projectCore.graph.unpinRelationship" : "projectCore.graph.pinRelationship")
+    : t(selectionPinned ? "projectCore.graph.unpinNode" : "projectCore.graph.pinNode");
+  function toggleSelectionPin() {
+    setCanvasNodes(current => {
+      const next = { ...current };
+      for (const id of pinTargetIds) {
+        if (next[id]) next[id] = { ...next[id], pinned: !selectionPinned };
+      }
+      return next;
+    });
+  }
+
   const inspectorCard = (
     <section className="content-card graph-canvas-inspector-card">
       {inspectorDetails ? (
         <>
-          <h2>{inspectorDetails.title}</h2>
+          <div className="graph-canvas-inspector-heading">
+            <h2>{inspectorDetails.title}</h2>
+            <button type="button" className={`btn graph-canvas-pin-button ${selectionPinned ? "btn--primary" : "btn--ghost"}`}
+              onClick={toggleSelectionPin} disabled={layoutRunning || !pinTargetIds.length}
+              aria-pressed={selectionPinned} aria-label={pinLabel} title={pinLabel}>
+              <PinIcon />
+            </button>
+          </div>
           <div className="graph-canvas-inspector-kicker">{inspectorDetails.itemType}</div>
           {inspectorDetails.typeDetail?.trim() ? (
             <div className="graph-canvas-inspector-type-detail">{inspectorDetails.typeDetail}</div>
@@ -938,6 +934,11 @@ export function ExploreCanvasView({
     });
 
     cyRef.current = cy;
+    setBadgeGraph(cy);
+    const stopObservingZoomBounds = observeCanvasZoomBounds(cy, () => {
+      setMinimumZoomPercent(cy.minZoom() * 100);
+      setZoomPercent(canvasZoomPercent(cy.zoom()));
+    });
 
     const handleNodeTap = (event: { target: { id: () => string }; originalEvent?: Event }) => {
       const nodeId = event.target.id();
@@ -1122,7 +1123,7 @@ export function ExploreCanvasView({
       setVisibleImageNodeIds((current) => JSON.stringify(current) === JSON.stringify(ids) ? current : ids);
       updateConnectorHandleRef.current();
       updateResizeHandleRef.current();
-      const nextZoomPercent = Math.round(cy.zoom() * 100);
+      const nextZoomPercent = canvasZoomPercent(cy.zoom());
       setZoomPercent((current) => current === nextZoomPercent ? current : nextZoomPercent);
     };
 
@@ -1137,6 +1138,7 @@ export function ExploreCanvasView({
       cy.removeListener("cxttap", handleBackgroundContextMenu);
       cy.removeListener("dragfree", "node", handleNodeDragFree);
       cy.removeListener("render pan zoom drag", handleCanvasViewportChange);
+      stopObservingZoomBounds();
       cy.destroy();
       cyRef.current = null;
     };
@@ -1160,14 +1162,15 @@ export function ExploreCanvasView({
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           fitExploreCanvas(cy, 36);
-          recordCurrentCanvasZoomAsDefault(cy);
+          recordCurrentCanvasZoom(cy);
           updateConnectorHandleRef.current();
           updateResizeHandleRef.current();
         });
       });
       return;
     }
-    cy.zoom(previousZoom);
+    updateCanvasZoomBounds(cy);
+    cy.zoom(Math.max(cy.minZoom(), Math.min(cy.maxZoom(), previousZoom)));
     cy.pan(previousPan);
     requestAnimationFrame(() => {
       cy.resize();
@@ -1193,8 +1196,11 @@ export function ExploreCanvasView({
     if (!cy || !embedded || fitOnVisibleKey <= 0) return;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // Opening/reloading the graph should show the whole graph, even with
+        // pins. Only explicit layout runs preserve the pinned viewport.
+        if (cy.destroyed()) return;
         fitExploreCanvas(cy, 36);
-        recordCurrentCanvasZoomAsDefault(cy);
+        recordCurrentCanvasZoom(cy);
         updateConnectorHandleRef.current();
         updateResizeHandleRef.current();
       });
@@ -1202,19 +1208,19 @@ export function ExploreCanvasView({
   }, [embedded, fitOnVisibleKey]);
 
   useEffect(() => {
+    if (!autoLayoutOnInitialLoad || initialAutoLayoutDoneRef.current || graphElements.length === 0 || graphExportBusy) return;
+    initialAutoLayoutDoneRef.current = true;
+    // Opening the graph fits every item, including pinned items. Subsequent
+    // layout requests keep the existing viewport when pins are present.
+    lastAutoLayoutVisibleKeyRef.current = autoLayoutOnVisibleKey;
+    void handleAutoLayout(true);
+  }, [autoLayoutOnInitialLoad, graphElements.length, graphExportBusy]);
+
+  useEffect(() => {
     if (!embedded || autoLayoutOnVisibleKey <= 0 || graphElements.length === 0) return;
     if (lastAutoLayoutVisibleKeyRef.current === autoLayoutOnVisibleKey) return;
     lastAutoLayoutVisibleKeyRef.current = autoLayoutOnVisibleKey;
-    void handleAutoLayout().then(() => {
-      const cy = cyRef.current;
-      if (!cy) return;
-      requestAnimationFrame(() => {
-        fitExploreCanvas(cy, 36);
-        recordCurrentCanvasZoomAsDefault(cy);
-        updateConnectorHandleRef.current();
-        updateResizeHandleRef.current();
-      });
-    });
+    void handleAutoLayout();
   }, [autoLayoutOnVisibleKey, embedded, graphElements.length]);
 
   useEffect(() => {
@@ -1308,24 +1314,9 @@ export function ExploreCanvasView({
     };
   }, [cancelRelationshipDraft, findRelationshipDraftTarget, onCanvasRelationshipDraftComplete, relationshipDraftActive, renderedPointFromPointerEvent]);
 
-  useEffect(() => {
-    if (!zoomMenuOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (zoomControlRef.current?.contains(target)) return;
-      setZoomMenuOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setZoomMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [zoomMenuOpen]);
+
+
+
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -1484,6 +1475,7 @@ export function ExploreCanvasView({
             ref={cyContainerRef}
             className="graph-canvas-canvas-surface"
           />
+          <CanvasPinBadges graph={badgeGraph} />
           {relationshipDraft ? (
             <svg className="graph-canvas-relationship-draft-layer" aria-hidden="true">
               <line
@@ -1549,53 +1541,6 @@ export function ExploreCanvasView({
             {controlLead}
             <div className="graph-canvas-canvas-controls-stack">
               <div className="graph-canvas-canvas-controls-row">
-                {controlStart}
-                <div className="graph-canvas-zoom-control" ref={zoomControlRef}>
-                  <button
-                    type="button"
-                    className={`btn ${zoomIsCustomized ? "btn--primary" : "btn--ghost"}`}
-                    onClick={() => setZoomMenuOpen((current) => !current)}
-                    aria-expanded={zoomMenuOpen}
-                    aria-label={zoomMenuOpen ? t("projectCore.graph.hideZoom") : t("projectCore.graph.showZoom")}
-                    title={t("projectCore.graph.zoom")}
-                  >
-                    <ZoomIcon className="graph-canvas-canvas-control-icon" />
-                  </button>
-                  {zoomMenuOpen ? (
-                    <div className="graph-canvas-zoom-menu">
-                      <label className="graph-canvas-zoom-slider-label" htmlFor="graph-canvas-zoom-slider">
-                        <span>{t("projectCore.graph.zoom")}</span>
-                        <strong>{zoomPercent}%</strong>
-                      </label>
-                      <input
-                        id="graph-canvas-zoom-slider"
-                        className="graph-canvas-zoom-slider"
-                        type="range"
-                        min={10}
-                        max={300}
-                        step={5}
-                        value={zoomPercent}
-                        onChange={(event) => setCanvasZoomFromPercent(Number(event.target.value))}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn--ghost graph-canvas-zoom-fit-btn"
-                        onClick={() => {
-                          const cy = cyRef.current;
-                          if (!cy) return;
-                          fitExploreCanvas(cy, 36);
-                          recordCurrentCanvasZoomAsDefault(cy);
-                          updateConnectorHandleRef.current();
-                          updateResizeHandleRef.current();
-                        }}
-                        aria-label={t("projectCore.graph.fitCanvas")}
-                        title={t("projectCore.graph.fitCanvas")}
-                      >
-                        <FitCornersIcon className="graph-canvas-canvas-control-icon" />
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
                 <button
                   type="button"
                   className={`btn ${autoLayoutIsCustomized ? "btn--primary" : "btn--ghost"}`}
@@ -1606,6 +1551,50 @@ export function ExploreCanvasView({
                 >
                   <LayoutNetworkIcon className="graph-canvas-canvas-control-icon" />
                 </button>
+                <CanvasGraphSettings settings={networkSettings} onChange={setNetworkSettings}
+                  attributes={groupingAttributes} busy={layoutRunning || objects.length === 0}
+                  itemSizeControls={itemSizeControls} customItemSizes={customItemSizes}
+                  onApply={() => void handleAutoLayout()} />
+                {controlStart}
+                <div className="graph-canvas-zoom-control" ref={zoomControlRef}>
+                  <button type="button" className="btn btn--ghost" onClick={() => setZoomMenuOpen(open => !open)}
+                    aria-expanded={zoomMenuOpen} aria-label={t("projectCore.graph.zoom")} title={t("projectCore.graph.zoom")}>
+                    <ZoomIcon className="graph-canvas-canvas-control-icon" />
+                  </button>
+                  {zoomMenuOpen ? <div className="graph-canvas-zoom-menu">
+                      <label className="graph-canvas-zoom-slider-label" htmlFor="graph-canvas-zoom-slider">
+                        <span>{t("projectCore.graph.zoom")}</span>
+                        <strong>{zoomPercent}%</strong>
+                      </label>
+                      <input
+                        id="graph-canvas-zoom-slider"
+                        className="graph-canvas-zoom-slider"
+                        type="range"
+                        min={minimumZoomPercent}
+                        max={300}
+                        step="any"
+                        value={zoomPercent}
+                        onChange={(event) => setCanvasZoomFromPercent(Number(event.target.value))}
+                      />
+                  </div> : null}
+                </div>
+                      <button
+                        type="button"
+                        className="btn btn--ghost graph-canvas-zoom-fit-btn"
+                        onClick={() => {
+                          const cy = cyRef.current;
+                          if (!cy) return;
+                          fitExploreCanvas(cy, 36);
+                          recordCurrentCanvasZoom(cy);
+                          updateConnectorHandleRef.current();
+                          updateResizeHandleRef.current();
+                        }}
+                        aria-label={t("projectCore.graph.fitCanvas")}
+                        title={t("projectCore.graph.fitCanvas")}
+                      >
+                        <FitCornersIcon className="graph-canvas-canvas-control-icon" />
+                      </button>
+
                 <button
                   type="button"
                   className="btn btn--ghost"

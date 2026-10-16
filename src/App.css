@@ -2397,11 +2397,12 @@ body {
 }
 
 .project-home-canvas-create-action svg.project-home-canvas-create-action-icon {
-  width: 42px;
-  height: 42px;
-  min-width: 42px;
-  min-height: 42px;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
   display: block;
+  flex: 0 0 auto;
 }
 
 .project-home-canvas-column > .view {
@@ -16631,3 +16632,57 @@ input[type="password"].form-input::-ms-clear {
 @media (max-width: 640px) {
   .sources-list-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
 }
+
+.graph-settings-card {
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(480px, calc(100dvh - 140px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.graph-settings-card p { margin: 0; font-size: var(--text-xs); }
+.graph-settings-field { display: flex; flex-direction: column; gap: 6px; }
+.graph-settings-field select { width: 100%; min-width: 0; }
+.graph-settings-check { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.graph-settings-check input { flex: 0 0 auto; }
+.graph-canvas-canvas-controls .graph-settings-apply { width: 100%; height: auto; min-height: 32px; }
+
+.graph-canvas-inspector-heading { display: flex; align-items: flex-start; gap: 10px; }
+.graph-canvas-inspector-heading h2 { flex: 1; min-width: 0; }
+.graph-canvas-pin-button { flex: 0 0 auto; width: 32px; height: 32px; padding: 6px; }
+.graph-canvas-pin-button svg { width: 18px; height: 18px; }
+.graph-settings-advanced > summary { cursor: pointer; font-weight: 600; }
+.graph-settings-advanced[open] > :not(summary) { margin-top: 12px; }
+.graph-settings-range-label { display: flex; justify-content: space-between; gap: 8px; }
+.graph-settings-range-label output { font-variant-numeric: tabular-nums; }
+.graph-settings-hint { font-size: var(--text-xs); }
+.graph-settings-field input[type="range"] { width: 100%; min-width: 0; }
+.graph-canvas-canvas-controls .graph-settings-reset { width: 100%; height: auto; min-height: 32px; white-space: normal; }
+.graph-settings-section > summary { cursor: pointer; font-weight: 600; }
+.graph-settings-section[open] > :not(summary) { margin-top: 10px; }
+.graph-settings-item-sizes .project-home-size-section-column { min-width: 0; width: 100%; }
+.graph-settings-item-sizes .project-home-selector-card { min-width: 0; }
+.graph-settings-item-sizes .project-home-size-slider-wrap { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.graph-settings-item-sizes .project-home-size-table { min-width: 0; width: 100%; table-layout: fixed; }
+.graph-settings-item-sizes .data-table-cell--name { overflow: hidden; text-overflow: ellipsis; }
+.graph-canvas-pin-badges { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.graph-canvas-pin-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  border: 1px solid #b04a33;
+  border-radius: 50%;
+  color: #b04a33;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  pointer-events: auto;
+}
+.graph-canvas-pin-badge svg { width: 12px; height: 12px; }

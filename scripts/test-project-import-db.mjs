@@ -29,7 +29,7 @@ try {
   await run(executable("pg_ctl"), ["-D", data, "-l", path.join(root, "postgres.log"), "-o", `-p ${port} -h 127.0.0.1`, "-w", "start"]);
   started = true;
   await run(executable("createdb"), ["-h", "127.0.0.1", "-p", String(port), "-U", "import_test", "kanqual_import_test"]);
-  const output = await run("cargo", ["test", "--offline", "--manifest-path", "src-tauri/Cargo.toml", "project_import::tests::imports_into_postgres", "--lib", "--", "--ignored"], {
+  const output = await run("cargo", ["test", "--offline", "--manifest-path", "src-tauri/Cargo.toml", "project_import::tests::imports_into_postgres", "--lib", "--", "--ignored", "--nocapture"], {
     ...process.env, KANQUAL_IMPORT_TEST_URL: `host=127.0.0.1 port=${port} user=import_test dbname=kanqual_import_test`,
   });
   console.log(output.trim());

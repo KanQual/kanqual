@@ -49,6 +49,7 @@ type PostgresCanvasCytoscapeNodeData = {
   sourceSilhouettePolygon?: string;
   textColor: string;
   textMaxWidth: number;
+  fontSize: number;
   width: number;
   height: number;
   label: string;
@@ -112,7 +113,7 @@ function getPostgresCanvasNodeLabel(object: PostgresObject): string {
   return objectType ? `${title}\n${objectType}` : title;
 }
 
-function getPostgresCanvasTextMaxWidth(shape: CanvasObjectShape, width: number): number {
+export function getPostgresCanvasTextMaxWidth(shape: CanvasObjectShape, width: number): number {
   switch (shape) {
     case "triangle":
       return Math.floor(width * 0.5);
@@ -131,6 +132,11 @@ function getPostgresCanvasTextMaxWidth(shape: CanvasObjectShape, width: number):
     default:
       return Math.floor(width * 0.72);
   }
+}
+
+export function getCanvasLabelFontSize(size: { width: number; height: number }, defaults: { width: number; height: number }): number {
+  const scale = Math.min(size.width / defaults.width, size.height / defaults.height);
+  return Number.isFinite(scale) && scale > 0 ? Math.max(1, 14 * scale) : 14;
 }
 
 export function buildPostgresCanvasCytoscapeElements(args: {
@@ -221,7 +227,8 @@ export function buildPostgresCanvasCytoscapeElements(args: {
         sourceImageHeight: appearance.sourceImageHeight ?? sourceImageHeight,
         sourceSilhouettePolygon: sourceImage ? POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON : "",
         textColor: surface.textColor,
-        textMaxWidth: Math.max(72, getPostgresCanvasTextMaxWidth(appearance.shape, width)),
+        textMaxWidth: Math.max(1, getPostgresCanvasTextMaxWidth(appearance.shape, width)),
+        fontSize: getCanvasLabelFontSize({ width, height }, getNodeRenderedDimensions(appearance.shape, undefined)),
         width,
         height,
         label: sourceImage ? "" : getPostgresCanvasNodeLabel(object),
@@ -286,7 +293,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
       "border-style": "solid",
       label: (element: { data: (key: string) => string }) => element.data("label"),
       color: (element: { data: (key: string) => string }) => element.data("textColor"),
-      "font-size": 14,
+      "font-size": (element: { data: (key: string) => number }) => element.data("fontSize") || 14,
       "font-weight": 700,
       "text-wrap": "wrap",
       "text-max-width": (element: { data: (key: string) => number }) => `${element.data("textMaxWidth")}px`,
@@ -294,7 +301,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
       "text-valign": "center",
       "text-justification": "center",
       "line-height": 1.16,
-      "text-margin-y": 2,
+      "text-margin-y": (element: { data: (key: string) => number }) => 2 * (element.data("fontSize") || 14) / 14,
       "text-events": "no",
       "shadow-blur": 18,
       "shadow-offset-x": 0,

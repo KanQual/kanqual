@@ -641,6 +641,7 @@ function areCanvasNodeMapsEqual(
     if (!rightNode) return false;
     if (
       leftNode.id !== rightNode.id
+      || Boolean(leftNode.pinned) !== Boolean(rightNode.pinned)
       || leftNode.x !== rightNode.x
       || leftNode.y !== rightNode.y
       || leftNode.width !== rightNode.width
@@ -906,7 +907,6 @@ function ProjectHomeViewContent({
   const [reportCount, setReportCount] = useState(0);
   const [homeCanvasCreateMenuOpen, setHomeCanvasCreateMenuOpen] = useState(false);
   const [homeCanvasFilterDrawerOpen, setHomeCanvasFilterDrawerOpen] = useState(false);
-  const [homeCanvasSizeMenuOpen, setHomeCanvasSizeMenuOpen] = useState(false);
   const [homeCanvasContextMenu, setHomeCanvasContextMenu] = useState<PostgresHomeCanvasContextMenuState | null>(null);
   const [homeCanvasAppearanceDraft, setHomeCanvasAppearanceDraft] = useState<PostgresHomeCanvasAppearanceDraft | null>(null);
   const [homeCanvasAppearanceSaving, setHomeCanvasAppearanceSaving] = useState(false);
@@ -925,7 +925,7 @@ function ProjectHomeViewContent({
   const [createCodeOpen, setCreateCodeOpen] = useState(false);
   const [editingHomeCanvasCodeId, setEditingHomeCanvasCodeId] = useState<string | null>(null);
   const [homeCanvasEnabledSections, setHomeCanvasEnabledSections] = useState<Set<PostgresHomeCanvasSection>>(
-    () => new Set(["sources", "objects", "relationships", "codes", "annotations"]),
+    () => new Set(["objects", "relationships", "annotations"]),
   );
   const [homeCanvasCollapsedSections, setHomeCanvasCollapsedSections] = useState<Set<PostgresHomeCanvasSection>>(
     () => new Set(["sources", "objects", "relationships", "codes"]),
@@ -1208,7 +1208,6 @@ function ProjectHomeViewContent({
   const imageCropResolverRef = useRef<((upload: PostgresImageUploadDraft | null) => void) | null>(null);
   const homeCanvasCreateControlRef = useRef<HTMLDivElement>(null);
   const homeCanvasFilterControlRef = useRef<HTMLDivElement>(null);
-  const homeCanvasSizeControlRef = useRef<HTMLDivElement>(null);
   const objectById = new Map(objects.map((object) => [object.id, object]));
   const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
   const relationshipTypeById = new Map(relationshipTypes.map((relationshipType) => [relationshipType.id, relationshipType]));
@@ -1241,24 +1240,7 @@ function ProjectHomeViewContent({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [homeCanvasFilterDrawerOpen]);
-  useEffect(() => {
-    if (!homeCanvasSizeMenuOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (homeCanvasSizeControlRef.current?.contains(target)) return;
-      setHomeCanvasSizeMenuOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setHomeCanvasSizeMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [homeCanvasSizeMenuOpen]);
+
   useEffect(() => {
     if (!homeCanvasContextMenu) return;
     function handlePointerDown(event: PointerEvent) {
@@ -6368,13 +6350,10 @@ function ProjectHomeViewContent({
           <ProjectHomeGraphViewLazy
             createControlRef={homeCanvasCreateControlRef}
             filterControlRef={homeCanvasFilterControlRef}
-            sizeControlRef={homeCanvasSizeControlRef}
             createMenuOpen={homeCanvasCreateMenuOpen}
             setCreateMenuOpen={setHomeCanvasCreateMenuOpen}
             filterDrawerOpen={homeCanvasFilterDrawerOpen}
             setFilterDrawerOpen={setHomeCanvasFilterDrawerOpen}
-            sizeMenuOpen={homeCanvasSizeMenuOpen}
-            setSizeMenuOpen={setHomeCanvasSizeMenuOpen}
             graphLoading={graphLoading}
             canvasStateLoaded={drawCanvasStateLoaded}
             loadingFallback={<ViewLoadingFallback />}
@@ -6520,6 +6499,7 @@ function ProjectHomeViewContent({
             }}
             fitOnVisibleKey={projectHomeGraphFitKey}
             autoLayoutOnVisibleKey={drawCanvasAutoLayoutKey}
+            autoLayoutOnInitialLoad={false}
             filteringActive={homeCanvasFilteringActive}
             collapsedSections={homeCanvasCollapsedSections}
             sourceRows={homeCanvasSourceRows}
@@ -6828,13 +6808,10 @@ function ProjectHomeViewContent({
                 <ProjectHomeGraphViewLazy
                   createControlRef={homeCanvasCreateControlRef}
                   filterControlRef={homeCanvasFilterControlRef}
-                  sizeControlRef={homeCanvasSizeControlRef}
                   createMenuOpen={homeCanvasCreateMenuOpen}
                   setCreateMenuOpen={setHomeCanvasCreateMenuOpen}
                   filterDrawerOpen={homeCanvasFilterDrawerOpen}
                   setFilterDrawerOpen={setHomeCanvasFilterDrawerOpen}
-                  sizeMenuOpen={homeCanvasSizeMenuOpen}
-                  setSizeMenuOpen={setHomeCanvasSizeMenuOpen}
                   graphLoading={graphLoading}
                   canvasStateLoaded={canvasStateLoaded}
                   loadingFallback={<ViewLoadingFallback />}

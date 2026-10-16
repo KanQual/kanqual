@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  SlidersHorizontal,
+  Pin,
   ArrowLeftToLine,
   ArrowLeftRight,
   Bot,
@@ -198,6 +200,16 @@ export function ZoomIcon({ className }: IconProps) {
 
 export function FitCornersIcon({ className }: IconProps) {
   return <LucideAppIcon Icon={Scan} className={className} />;
+}
+
+
+
+export function GraphSettingsIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={SlidersHorizontal} className={className} />;
+}
+
+export function PinIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Pin} className={className} />;
 }
 
 export function LayoutNetworkIcon({ className }: IconProps) {

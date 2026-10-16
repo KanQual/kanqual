@@ -6606,6 +6606,8 @@ struct PostgresExperimentCanvasPoint {
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentCanvasNodeState {
     id: String,
+    #[serde(default)]
+    pinned: bool,
     x: f64,
     y: f64,
     width: f64,
@@ -32940,6 +32942,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
+
+    #[test]
+    fn canvas_node_pin_round_trips_and_defaults_for_old_canvases() {
+        let old = serde_json::json!({"id":"node", "x":12.0, "y":34.0, "width":80.0, "height":50.0});
+        let mut node: super::PostgresExperimentCanvasNodeState = serde_json::from_value(old).unwrap();
+        assert!(!node.pinned);
+        node.pinned = true;
+        let restored: super::PostgresExperimentCanvasNodeState =
+            serde_json::from_value(serde_json::to_value(&node).unwrap()).unwrap();
+        assert!(restored.pinned);
+        assert_eq!((restored.x, restored.y), (12.0, 34.0));
+    }
 
     use super::{
         decrypt_encrypted_backup_payload_text, derive_encrypted_backup_key,
