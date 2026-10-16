@@ -21,18 +21,17 @@ Core capabilities include:
 - Collaborating over a trusted network when explicitly enabled
 - Using AI Assist for chat, coding, attribute identification, transcript processing, and code analysis
 
-## Version 0.9.9
+## Version 0.9.10
 
-Version 0.9.9 improves full-installation restore in Admin Settings, fixes administrator-session checks, and simplifies the backup and password steps.
+Version 0.9.10 improves graph exploration with a new network layout, configurable grouping, reliable pinning, and controls for larger projects.
 
 Highlights include:
 
-- Backup selection and password validation in Admin Settings, followed by a dedicated restore workflow on the login background
-- A strongly recommended recovery backup that users can choose to skip; the current administrator password is required only when creating that backup
-- A shared four-card backup summary and a separate new-administrator-password screen
-- Continue opens the password step without restarting or asking for the validated backup password again; passwords remain in memory and must be re-entered if the app is closed or reloaded
-- Restoration blocks normal app commands, stops PostgreSQL before replacing data, and retains recovery handling for failed or interrupted restores
-- Clearer labels, consistent button ordering, and login-sized restore screens that scroll on smaller displays
+- fCoSE network auto layout with grouping by type enabled by default and automatic layout when graph mode opens
+- Graph settings for grouping by source/object, type, or attribute values, with spacing, label room, and advanced layout controls
+- Pin objects or relationship endpoints to preserve their positions during layout, with visible pin badges
+- Adaptive zoom and fit behavior for large graphs, plus labels that scale with item sizes
+- A reorganized graph toolbar; sources and codes are hidden initially and can be enabled through filters
 - Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages
 
 KanQual remains under active development. Interfaces, AI workflows, packaging, and setup may continue to evolve as the application approaches version 1.0.
