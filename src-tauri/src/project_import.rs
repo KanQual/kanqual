@@ -833,7 +833,7 @@ mod tests {
             if let Ok(path) = std::env::var("KANQUAL_IMPORT_FIXTURE") {
                 let progress = project_import_stream::Progress::new(None, "external-fixture".into());
                 let staged = project_import_stream::prepare(Path::new(&path), None, &progress).unwrap().unwrap();
-                assert!(staged.warnings.is_empty(), "Unexpected import warnings: {:?}", staged.warnings);
+                assert!(staged.warnings.is_empty(), "Unexpected import warnings");
                 let transaction = client.transaction().await.unwrap();
                 for table in IMPORT_TABLES.iter().rev() {
                     transaction.execute(&format!("DELETE FROM {}", sql_escape_identifier(table)), &[]).await.unwrap();
