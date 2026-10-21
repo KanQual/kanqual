@@ -4,6 +4,8 @@
 
 KanQual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, visualization, and AI-assisted analysis. It is developed by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
 
+Visit [Kanqual.com](https://kanqual.com) to learn more.
+
 KanQual is a desktop application built with Tauri, React, TypeScript, Rust, and an app-managed PostgreSQL backend. It is developed on Windows 11 and has also been tested on Windows 10, macOS 26.5, and Ubuntu 26.04.
 
 ## What KanQual Does
@@ -45,6 +47,15 @@ Release packaging targets:
 - Linux x64: AppImage and DEB builds
 
 Available builds are published on the [GitHub Releases page](https://github.com/KanQual/kanqual/releases).
+
+## Sample Data
+
+Explore KanQual with a fictional, AI-generated dataset about undergraduate students' sense of belonging on a college campus.
+
+- [Download interview transcripts (ZIP)](https://github.com/KanQual/kanqual/releases/download/sample-data-v1.0.0/belonging-transcripts.zip): 18 Word transcripts, labeled as fictional demonstration data.
+- [Download sample multimedia (ZIP)](https://github.com/KanQual/kanqual/releases/download/sample-data-v1.0.0/belonging-media.zip): 3 PDF event fliers, 3 image event fliers, 2 synthetic student audio diaries, and 1 captioned university promotion video, plus transcripts and a preview gallery.
+
+Extract the ZIP files, create a demonstration project, and add the documents and media through the appropriate source-upload tabs. These are source files, not project-backup archives. All people, events, and accounts are fictional; the recordings use synthesized voices.
 
 ## Product Principles
 
