@@ -23,17 +23,17 @@ Core capabilities include:
 - Collaborating over a trusted network when explicitly enabled
 - Using AI Assist for chat, coding, attribute identification, transcript processing, and code analysis
 
-## Version 0.9.10
+## Version 0.9.11
 
-Version 0.9.10 improves graph exploration with a new network layout, configurable grouping, reliable pinning, and controls for larger projects.
+Version 0.9.11 fixes audio and video coding playback, restores source-list layout, and adds automated media regression checks.
 
 Highlights include:
 
-- fCoSE network auto layout with grouping by type enabled by default and automatic layout when graph mode opens
-- Graph settings for grouping by source/object, type, or attribute values, with spacing, label room, and advanced layout controls
-- Pin objects or relationship endpoints to preserve their positions during layout, with visible pin badges
-- Adaptive zoom and fit behavior for large graphs, plus labels that scale with item sizes
-- A reorganized graph toolbar; sources and codes are hidden initially and can be enabled through filters
+- Reliable media-player attachment and playback event handling in audio and video coding
+- Reserved vertical space for clip controls, with video resizing to fit above them
+- Vertically centered source-type cards that remain scrollable on smaller screens
+- Dedicated media lifecycle handling and automatic playback, waveform, and layout checks in CI and Windows release builds
+- Fictional sample transcripts and multimedia downloads for exploring KanQual
 - Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages
 
 KanQual remains under active development. Interfaces, AI workflows, packaging, and setup may continue to evolve as the application approaches version 1.0.
