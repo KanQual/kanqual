@@ -32,6 +32,7 @@
     "test:source-screen": "node scripts/test-source-screen.mjs",
     "test:source-summaries": "node scripts/test-source-summaries.mjs",
     "test:media-stream": "node scripts/test-media-stream.mjs",
+    "test:media-coding": "node scripts/test-media-coding.mjs",
     "test:project-import": "node scripts/test-project-import.mjs",
     "test:project-import-db": "node scripts/test-project-import-db.mjs",
     "test:project-import-large": "cargo test --offline --manifest-path src-tauri/Cargo.toml project_import_stream::tests::attachment_larger --lib -- --ignored --nocapture",

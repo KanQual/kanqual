@@ -39,6 +39,12 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify source layout
+        run: npm run test:source-screen
+
+      - name: Verify media coding playback and waveforms
+        run: npm run test:media-coding
+
       - name: Fetch bundled PostgreSQL runtime
         run: npm run fetch:bundled-postgres -- --target windows-x86_64
 

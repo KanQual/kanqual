@@ -7,7 +7,7 @@ if (process.argv.slice(2).some(arg => arg !== '--performance')) {
 const tests = process.argv.includes('--performance')
   ? ['test-media-stream', 'test-image-previews']
   : [
-    'test-browser-harness', 'test-home-scroll', 'test-source-screen', 'test-table-screen',
+    'test-browser-harness', 'test-home-scroll', 'test-source-screen', 'test-media-coding', 'test-table-screen',
     'test-annotation-screen', 'test-annotation-return', 'test-list-return',
     'test-table-return', 'test-view-navigation', 'test-navigation-preload',
     'test-lock-readiness', 'diagnose-text-selection', 'diagnose-annotation-deletion',

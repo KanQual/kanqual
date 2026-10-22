@@ -1,5 +1,6 @@
-import { openMediaStream, releaseMediaUrl, runMediaAnalysis } from "../lib/mediaStream";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { runMediaAnalysis } from "../lib/mediaStream";
+import { useSourceMedia } from "../lib/useSourceMedia";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpModal } from "../components/HelpModal";
 import { ViewHeader } from "../components/ViewHeader";
@@ -269,15 +270,11 @@ export function SourceMediaCodingView({
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [generatedWaveformCache, setGeneratedWaveformCache] = useState<MediaWaveformCache | null>(null);
   const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [clipPlaybackAnnotationId, setClipPlaybackAnnotationId] = useState<string | null>(null);
-  const [mediaElement, setMediaElement] = useState<HTMLMediaElement | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(1);
@@ -306,7 +303,6 @@ export function SourceMediaCodingView({
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
   const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
-  const mediaElementRef = useRef<HTMLMediaElement | null>(null);
   const mediaTimelineRef = useRef<SourceMediaTimelineHandle | null>(null);
   const playbackRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const playbackMonitorFrameRef = useRef<number | null>(null);
@@ -314,15 +310,10 @@ export function SourceMediaCodingView({
   const volumeControlCloseTimeoutRef = useRef<number | null>(null);
   const zoomControlCloseTimeoutRef = useRef<number | null>(null);
   const speedControlCloseTimeoutRef = useRef<number | null>(null);
-  const mediaElementCallbackRef = useCallback((element: HTMLMediaElement | null) => {
-    if (mediaElementRef.current === element) return;
-    mediaElementRef.current = element;
-    setMediaElement(element);
-  }, []);
-
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
   const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
+  const { previewUrl, previewError, previewLoading, setPreviewError, mediaElement, mediaElementRef, mediaElementCallbackRef } = useSourceMedia(resolvedFilePath, mediaKind);
   const persistedWaveformCache = useMemo(() => parseMediaWaveformCache(row.waveformPeaksJson), [row.waveformPeaksJson]);
   const waveformCache = generatedWaveformCache ?? persistedWaveformCache;
   const mediaAnnotations = useMemo(
@@ -478,54 +469,6 @@ export function SourceMediaCodingView({
     setGeneratedWaveformCache(null);
   }, [row.id, row.waveformPeaksJson]);
 
-  useEffect(() => {
-    if (!resolvedFilePath) {
-      setPreviewLoading(false);
-      setPreviewError(null);
-      setPreviewUrl((current) => {
-        if (current) releaseMediaUrl(current);
-        return null;
-      });
-      return;
-    }
-
-    let cancelled = false;
-    let objectUrl: string | null = null;
-
-    setPreviewLoading(true);
-    setPreviewError(null);
-    logOpenTiming("stream-open-start", { path: resolvedFilePath });
-
-    void openMediaStream(resolvedFilePath)
-      .then((url) => {
-        if (cancelled) { releaseMediaUrl(url); return; }
-        objectUrl = url;
-        setPreviewUrl((current) => {
-          if (current) releaseMediaUrl(current);
-          return objectUrl;
-        });
-        logOpenTiming("preview-url-ready");
-      })
-      .catch((loadError) => {
-        if (cancelled) return;
-        logOpenTiming("stream-open-error", {
-          message: loadError instanceof Error ? loadError.message : "unknown",
-        });
-        setPreviewError(loadError instanceof Error ? loadError.message : `Failed to load ${mediaKind} preview.`);
-        setPreviewUrl((current) => {
-          if (current) releaseMediaUrl(current);
-          return null;
-        });
-      })
-      .finally(() => {
-        if (!cancelled) setPreviewLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) releaseMediaUrl(objectUrl);
-    };
-  }, [fileExt, mediaKind, resolvedFilePath]);
 
   useEffect(() => {
     setAnalysisRunning(false);
@@ -566,8 +509,6 @@ export function SourceMediaCodingView({
   }
 
   useEffect(() => {
-    setMediaElement(null);
-    mediaElementRef.current = null;
     setPlaybackRate(1);
     setIsPlaying(false);
     setVolumeLevel(1);
@@ -583,7 +524,6 @@ export function SourceMediaCodingView({
   }, [mediaElement, previewUrl, mediaKind]);
 
   useEffect(() => {
-    const mediaElement = mediaElementRef.current;
     if (!mediaElement) return;
 
     const stopPlaybackAtRangeEnd = (playbackRange: { startMs: number; endMs: number }) => {
@@ -691,7 +631,7 @@ export function SourceMediaCodingView({
       mediaElement.removeEventListener("play", handlePlay);
       mediaElement.removeEventListener("pause", handlePause);
     };
-  }, [clipPlaybackAnnotationId, mediaAnnotations]);
+  }, [mediaElement, clipPlaybackAnnotationId, mediaAnnotations]);
 
   function togglePendingClipCode(codeId: string) {
     setPendingClipCodeIds((current) => (
@@ -1248,15 +1188,15 @@ export function SourceMediaCodingView({
                 </p>
               </div>
             ) : previewUrl ? (
-              <div style={{ display: "grid", gap: 16, minHeight: 0 }}>
+              <div className={`media-player-stage media-player-stage--${mediaKind}`}>
                 {mediaKind === "video" ? (
-                  <div className="doc-content-scroll-shell" style={{ padding: 0 }}>
+                  <div className="doc-content-scroll-shell media-player-stage-video">
                     <video crossOrigin="anonymous" preload="metadata"
                       ref={mediaElementCallbackRef}
                       onError={() => setPreviewError(t("sourceCoding.media.previewOpenFailed", { kind: mediaKind }))}
                       src={previewUrl}
                       playsInline
-                      style={{ display: "block", width: "100%", maxHeight: "52vh", background: "#000000" }}
+                      className="media-player-stage-video-element"
                     />
                   </div>
                 ) : (

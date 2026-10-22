@@ -16520,6 +16520,8 @@ input[type="password"].form-input::-ms-clear {
   overflow-x: hidden;
 }
 .master-detail-grid > .home-primary-column > * { flex-shrink: 0; }
+/* Auto margins center the card when it fits and collapse when it must scroll. */
+.sources-type-column > .content-card { margin-block: auto; }
 .codebook-table-shell { min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .table-card,
 .ai-process-doc-source-card {

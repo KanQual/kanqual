@@ -1,4 +1,5 @@
 .media-player-console-frame {
+  --media-player-transport-action-card-height: 112.5px;
   --media-player-controls-width: 760px;
   --media-player-controls-pill-width: 285px;
   --media-player-clip-surface-start: rgba(237, 242, 247, 0.98);
@@ -6,6 +7,8 @@
   --media-player-clip-surface-border: rgba(53, 80, 112, 0.18);
   position: relative;
   display: grid;
+  /* Keep the clip editor's row even before a clip is selected. */
+  grid-template-rows: auto calc(var(--media-player-transport-action-card-height) + 8px);
   justify-items: center;
   gap: 0;
   width: 100%;
@@ -27,6 +30,41 @@
 .media-source-card .doc-viewer-toolbar {
   border: 0;
   border-radius: 0;
+}
+
+.media-source-card > :not(.media-player-stage) {
+  flex-shrink: 0;
+}
+
+.media-player-stage {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.media-player-stage--video {
+  flex: 1;
+  /* Reserve the console's full height; the picture gets what remains. */
+  grid-template-rows: minmax(0, 1fr) max-content;
+}
+
+.media-player-stage-video {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-player-stage-video-element {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+  background: #000;
 }
 
 .media-player-console-outline {
@@ -328,7 +366,6 @@
 }
 
 .media-player-transport-action-card {
-  --media-player-transport-action-card-height: 112.5px;
   --media-player-transport-action-card-padding-y: 8px;
   --media-player-transport-action-stack-gap: 6px;
   --media-player-transport-action-button-size: calc((var(--media-player-transport-action-card-height) - (var(--media-player-transport-action-card-padding-y) * 2) - var(--media-player-transport-action-stack-gap)) / 2);

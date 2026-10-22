@@ -25,6 +25,11 @@ try {
   const { call, evaluate, until } = session;
   await session.navigate(server.url);
 console.log('Waiting for list');await until('document.querySelectorAll(".case-list-row").length===50');
+for (const codingEnabled of [false, true]) {
+ await evaluate(`renderSource({codingEnabled:${codingEnabled}})`);
+ const center=await evaluate(`(()=>{const column=document.querySelector('.sources-type-column').getBoundingClientRect(),card=document.querySelector('.sources-type-column > .content-card').getBoundingClientRect();return Math.abs((column.top+column.bottom-card.top-card.bottom)/2);})()`);
+ assert.ok(center<2, 'Source type card must be vertically centered: '+center);
+}
 const scrollBounds=await evaluate(`(()=>{const w=document.querySelector('.table-card .data-table-wrap');w.scrollTop=1e8;return {bottom:w.getBoundingClientRect().bottom,last:w.querySelector('tbody tr:last-child').getBoundingClientRect().bottom,viewport:innerHeight};})()`);
 assert.ok(scrollBounds.last<=scrollBounds.bottom+2 && scrollBounds.bottom<=scrollBounds.viewport,JSON.stringify(scrollBounds));
 const initial=await evaluate('calls.map(c=>c.command).filter(c=>!c.includes("auth_status"))');assert.equal(initial.filter(c=>c==='list_source_page_command').length,1);assert.ok(!initial.some(c=>/annotations|relationships|objects_command|memos|sources_command/.test(c)));

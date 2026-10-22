@@ -1,0 +1,74 @@
+{
+  "dataset": "Alderbridge student belonging",
+  "version": "1.0",
+  "fictional": true,
+  "assets": [
+    {
+      "file": "images/01-a-seat-at-the-table.png",
+      "bytes": 2850460,
+      "sha256": "c041765ef57397cf3b38a66c9cbf344eb48f91eee4d9d9e4dbc2a5ec5df2704b",
+      "synthetic": true
+    },
+    {
+      "file": "images/02-stories-after-hours.png",
+      "bytes": 2414243,
+      "sha256": "5da580e76ad90d4604355933ae99cd9e39123f74a91a88d9ea5e96f39efef708",
+      "synthetic": true
+    },
+    {
+      "file": "images/03-grow-something-together.png",
+      "bytes": 2472323,
+      "sha256": "be8fe9c1b99a4704bb06453b1a2430cc20bda9c431c512030f773412995313d5",
+      "synthetic": true
+    },
+    {
+      "file": "pdfs/04-between-classes.pdf",
+      "bytes": 2470,
+      "sha256": "87858ed9e5666764761b178677f9beefdffc06b1aa70216877349e27f9ba95b6",
+      "synthetic": true
+    },
+    {
+      "file": "pdfs/05-founders-evening.pdf",
+      "bytes": 2403,
+      "sha256": "1a8d273a851f1cc311debe6e490aa542fe859e61ef84b868a5834793bfe29cb1",
+      "synthetic": true
+    },
+    {
+      "file": "pdfs/06-make-room.pdf",
+      "bytes": 2569,
+      "sha256": "587ef858ab7da87514947f9f1fe8dd179d7659b9637e88932e263f9410887cbc",
+      "synthetic": true
+    },
+    {
+      "file": "audio/07-maya-finding-a-place.mp3",
+      "bytes": 2183043,
+      "sha256": "1e9be247b71e537b0c9ded421e86cda184fd14e66c5184aa174d112ba16743de",
+      "synthetic": true,
+      "duration_seconds": 136.360249,
+      "codecs": [
+        "mp3"
+      ]
+    },
+    {
+      "file": "audio/08-eli-at-the-edges.mp3",
+      "bytes": 2407905,
+      "sha256": "2e2383b15b9193507ce3a04cbbf574fa50c335f9fd824247e86906f7b3d5b0bb",
+      "synthetic": true,
+      "duration_seconds": 150.417279,
+      "codecs": [
+        "mp3"
+      ]
+    },
+    {
+      "file": "video/09-alderbridge-university-promotion.mp4",
+      "bytes": 10591473,
+      "sha256": "0fde2e472abab5a5c2675394b6c924eb31a06a47359ca45d4e3eb35a0f9701c2",
+      "synthetic": true,
+      "duration_seconds": 64.610023,
+      "codecs": [
+        "h264",
+        "aac"
+      ]
+    }
+  ]
+}

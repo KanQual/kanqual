@@ -101,6 +101,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify source layout before packaging
+        if: runner.os == 'Windows'
+        run: npm run test:source-screen
+
+      - name: Verify media coding before packaging
+        if: runner.os == 'Windows'
+        run: npm run test:media-coding
+
       - name: Fetch bundled PostgreSQL runtime for this platform
         run: npm run fetch:bundled-postgres -- --target ${{ matrix.postgres_runtime_target }}
 

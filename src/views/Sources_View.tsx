@@ -5845,7 +5845,7 @@ export function SourcesView({
 
       <MasterDetailLayout>
         <div
-          className="home-primary-column"
+          className="home-primary-column sources-type-column"
           style={{
             gap: 16,
             minHeight: 0,
@@ -5855,18 +5855,6 @@ export function SourcesView({
             paddingRight: 4,
           }}
         >
-          {!selectedRow ? (
-            <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
-              <div className="segmented-control" role="presentation">
-                <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
-                  {t("sharedModals.tabs.details")}
-                </button>
-                <button type="button" className="segmented-control-option" tabIndex={-1}>
-                  {t("sharedModals.tabs.attributes")}
-                </button>
-              </div>
-            </div>
-          ) : null}
           <section className="content-card" style={{ padding: 0, overflow: "hidden" }}>
             <div
               style={{

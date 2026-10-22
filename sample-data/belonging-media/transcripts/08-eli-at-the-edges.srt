@@ -1,0 +1,143 @@
+1
+00:00:00,000 --> 00:00:04,319
+This is a fictional student diary for the Kanqual demonstration.
+
+2
+00:00:04,669 --> 00:00:06,923
+The voice is synthesized.
+
+3
+00:00:07,273 --> 00:00:10,162
+I'm Eli, a third-year student.
+
+4
+00:00:10,512 --> 00:00:16,146
+I commute about forty minutes, and I work at a grocery store four evenings a week.
+
+5
+00:00:16,496 --> 00:00:18,475
+I like my classes.
+
+6
+00:00:18,825 --> 00:00:21,249
+I want to be clear about that.
+
+7
+00:00:21,599 --> 00:00:26,893
+My seminar professor knows my name, and our group project is going well.
+
+8
+00:00:27,243 --> 00:00:32,511
+But being comfortable in a classroom isn't the same as feeling part of the university.
+
+9
+00:00:32,861 --> 00:00:35,985
+I saw the Stories After Hours poster.
+
+10
+00:00:36,335 --> 00:00:39,594
+Poetry and music, free entry.
+
+11
+00:00:39,944 --> 00:00:43,518
+It sounded like exactly the kind of thing I'd enjoy.
+
+12
+00:00:43,868 --> 00:00:45,967
+Then I looked at the time.
+
+13
+00:00:46,317 --> 00:00:48,431
+Eight until ten at night.
+
+14
+00:00:48,781 --> 00:00:55,930
+My last practical bus connection leaves before it's over, and on Fridays I'm usually closing at work anyway.
+
+15
+00:00:56,280 --> 00:00:58,834
+Free doesn't mean I can get there.
+
+16
+00:00:59,184 --> 00:01:02,378
+People say, you should get involved.
+
+17
+00:01:02,728 --> 00:01:05,597
+They mean it kindly, mostly.
+
+18
+00:01:05,947 --> 00:01:10,450
+But it starts to sound as though being left out is something I'm choosing.
+
+19
+00:01:10,800 --> 00:01:16,774
+I can't keep explaining my shift schedule every time someone asks why I wasn't at an event.
+
+20
+00:01:17,124 --> 00:01:20,518
+Yesterday I tried the Between Classes lunch.
+
+21
+00:01:20,868 --> 00:01:23,332
+I only had twenty minutes.
+
+22
+00:01:23,682 --> 00:01:26,736
+Nobody made it strange when I left early.
+
+23
+00:01:27,086 --> 00:01:33,099
+Another commuter told me there's a group chat where people arrange study sessions before their buses.
+
+24
+00:01:33,449 --> 00:01:34,968
+I joined it.
+
+25
+00:01:35,318 --> 00:01:38,227
+So I don't want to say nothing works.
+
+26
+00:01:38,577 --> 00:01:43,131
+That lunch worked because somebody had thought about when we'd actually be here.
+
+27
+00:01:43,481 --> 00:01:48,294
+The university promotion makes campus look like one big shared living room.
+
+28
+00:01:48,644 --> 00:01:53,238
+I watch that and wonder where the people who leave at three fit into the picture.
+
+29
+00:01:53,588 --> 00:01:56,427
+I don't need to be in an advertisement.
+
+30
+00:01:56,777 --> 00:02:02,860
+I need a place to sit without buying coffee, and plans that don't always start after dinner.
+
+31
+00:02:03,210 --> 00:02:06,869
+There's a listening session called Make Room next month.
+
+32
+00:02:07,219 --> 00:02:11,823
+I'll be working, but the flier says written comments are welcome.
+
+33
+00:02:12,173 --> 00:02:13,992
+I might leave one.
+
+34
+00:02:14,342 --> 00:02:18,311
+I want to know what happens after the comments, though.
+
+35
+00:02:18,661 --> 00:02:23,530
+If they post a summary and change even one event time, I'll notice.
+
+36
+00:02:23,880 --> 00:02:30,068
+Belonging would mean I don't have to rearrange my whole life just to have a small part in campus life.
